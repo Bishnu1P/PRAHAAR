@@ -2,6 +2,7 @@
 #include "Entity.hpp"
 #include "Player.hpp"
 #include <cmath>
+#include <algorithm>
 
 enum class EnemyType { Grunt, Runner, Brute };
 
@@ -25,18 +26,21 @@ public:
             case EnemyType::Grunt:
                 health = 20.f;
                 speed = 80.f;
+                touchDamage = 5.f;
                 shape.setRadius(14.f);
                 shape.setFillColor(sf::Color(200, 60, 60)); // red
                 break;
             case EnemyType::Runner:
                 health = 10.f;
                 speed = 150.f;
+                touchDamage = 3.f;
                 shape.setRadius(10.f);
                 shape.setFillColor(sf::Color(230, 200, 60)); // yellow
                 break;
             case EnemyType::Brute:
                 health = 60.f;
                 speed = 50.f;
+                touchDamage = 15.f;
                 shape.setRadius(22.f);
                 shape.setFillColor(sf::Color(120, 20, 20)); // dark red
                 break;
@@ -65,13 +69,23 @@ public:
         window.draw(shape);
     }
 
+    // --- Combat ---
+    void takeDamage(float amount) {
+        health = std::max(0.f, health - amount);
+        if (health <= 0.f) {
+            active = false; // dies -> slot returns to the pool automatically
+        }
+    }
+
     float getHealth() const { return health; }
     float getRadius() const { return shape.getRadius(); }
+    float getTouchDamage() const { return touchDamage; }
 
 private:
     sf::CircleShape shape;
     EnemyType type = EnemyType::Grunt;
     float speed = 0.f;
     float health = 0.f;
+    float touchDamage = 0.f;
     const Player* target = nullptr;
 };

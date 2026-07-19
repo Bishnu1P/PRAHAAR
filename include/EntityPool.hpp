@@ -47,6 +47,20 @@ public:
         }
     }
 
+    // Returns raw pointers to all currently-active entities. Used for
+    // weapon targeting (find nearest enemy) and collision checks.
+    // Rebuilt each call rather than cached, since active entities change
+    // every frame — fine at this project's scale (dozens-hundreds of entities).
+    std::vector<T*> getActive() const {
+        std::vector<T*> result;
+        for (auto& entity : pool) {
+            if (entity->isActive()) {
+                result.push_back(entity.get());
+            }
+        }
+        return result;
+    }
+
     size_t activeCount() const {
         size_t count = 0;
         for (auto& entity : pool) {
