@@ -15,36 +15,39 @@ public:
     }
 
     // Called every time this pooled slot is (re)spawned as a new enemy.
-    // This replaces a constructor, since the object itself is reused.
-    void reset(EnemyType newType, sf::Vector2f spawnPos, const Player* targetPlayer) {
+    // difficultyMultiplier scales health/damage/speed up as the game
+    // gets harder (combines elapsed survival time + player level —
+    // see EnemySpawner for how it's computed).
+    void reset(EnemyType newType, sf::Vector2f spawnPos, const Player* targetPlayer, float difficultyMultiplier = 1.f) {
         type = newType;
         target = targetPlayer;
         active = true;
 
-        // Stats per type, matching docs/design-doc.md
+        // Base stats per type, matching docs/design-doc.md
+        float baseHealth, baseSpeed, baseDamage;
         switch (type) {
             case EnemyType::Grunt:
-                health = 20.f;
-                speed = 80.f;
-                touchDamage = 5.f;
+                baseHealth = 20.f; baseSpeed = 80.f; baseDamage = 5.f;
                 shape.setRadius(14.f);
                 shape.setFillColor(sf::Color(200, 60, 60)); // red
                 break;
             case EnemyType::Runner:
-                health = 10.f;
-                speed = 150.f;
-                touchDamage = 3.f;
+                baseHealth = 10.f; baseSpeed = 150.f; baseDamage = 3.f;
                 shape.setRadius(10.f);
                 shape.setFillColor(sf::Color(230, 200, 60)); // yellow
                 break;
-            case EnemyType::Brute:
-                health = 60.f;
-                speed = 50.f;
-                touchDamage = 15.f;
+            default: // Brute
+                baseHealth = 60.f; baseSpeed = 50.f; baseDamage = 15.f;
                 shape.setRadius(22.f);
                 shape.setFillColor(sf::Color(120, 20, 20)); // dark red
                 break;
         }
+
+        health = baseHealth * difficultyMultiplier;
+        touchDamage = baseDamage * difficultyMultiplier;
+        // Speed scales more gently than health/damage — a swarm that's
+        // both tankier, harder-hitting, AND much faster gets unfair fast.
+        speed = baseSpeed * (1.f + (difficultyMultiplier - 1.f) * 0.3f);
 
         shape.setOrigin(shape.getRadius(), shape.getRadius());
         setPosition(spawnPos);

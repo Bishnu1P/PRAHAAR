@@ -66,6 +66,17 @@ public:
     float getMaxHealth() const { return maxHealth; }
     bool isAlive() const { return health > 0.f; }
     float getRadius() const { return shape.getRadius(); }
+    float getPickupRadius() const { return pickupRadius; }
+
+    // --- Upgrades (applied on level-up, see Progression/Game) ---
+    void increaseMaxHealth(float amount) {
+        maxHealth += amount;
+        health += amount; // levelling up also heals by the bonus amount
+    }
+
+    void increaseSpeed(float amount) {
+        speed += amount;
+    }
 
 private:
     void drawHealthBar(sf::RenderWindow& window) {
@@ -93,4 +104,5 @@ private:
     float health;
     float maxHealth;
     float invulnerableTimer = 0.f;
+    float pickupRadius = 40.f; // matches docs/design-doc.md
 };

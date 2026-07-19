@@ -5,37 +5,51 @@
 #include "EntityPool.hpp"
 
 // Owns the spawn timer and difficulty curve, and hands off newly
-// spawned enemies into the EntityPool. Matches the formulas already
-// written in docs/design-doc.md.
+// spawned enemies into the EntityPool.
 class EnemySpawner {
 public:
     EnemySpawner(EntityPool<Enemy>& poolRef, sf::Vector2u windowSize)
         : pool(poolRef), winSize(windowSize), rng(std::random_device{}())
     {}
 
-    void update(float dt, float elapsedTime, const Player& player) {
+    void update(float dt, float elapsedTime, int playerLevel, const Player& player) {
         spawnTimer += dt;
 
         float interval = spawnInterval(elapsedTime);
         if (spawnTimer >= interval) {
             spawnTimer = 0.f;
-            spawnOne(elapsedTime, player);
+            spawnOne(elapsedTime, playerLevel, player);
         }
     }
 
 private:
-    // Matches: spawn_interval(t) = max(0.3, 2.0 - 0.01 * t_seconds)
+    // Tightened from the original design-doc draft: starts faster (1.5s
+    // vs 2.0s) and ramps down quicker (0.015/sec vs 0.01/sec), so the
+    // early game isn't quite so sparse.
     float spawnInterval(float elapsedTime) const {
-        return std::max(0.3f, 2.0f - 0.01f * elapsedTime);
+        return std::max(0.25f, 1.5f - 0.015f * elapsedTime);
     }
 
-    EnemyType pickType(float elapsedTime) {
-        // Grunts only at first; Runners after ~1 min; Brutes after ~3 min.
+    // Combines time survived AND player level, so a player who's
+    // leveling up fast (killing lots of enemies) faces rising
+    // difficulty too, not just whoever waits around longest.
+    float difficultyMultiplier(float elapsedTime, int playerLevel) const {
+        float timeFactor = 1.f + 0.02f * (elapsedTime / 60.f);   // +2% per minute survived
+        float levelFactor = 1.f + 0.08f * (playerLevel - 1);      // +8% per player level
+        return timeFactor * levelFactor;
+    }
+
+    EnemyType pickType(float elapsedTime, int playerLevel) {
         std::uniform_real_distribution<float> roll(0.f, 1.f);
         float r = roll(rng);
 
-        if (elapsedTime > 180.f && r < 0.15f) return EnemyType::Brute;
-        if (elapsedTime > 60.f && r < 0.4f) return EnemyType::Runner;
+        // Variety unlocks earlier now, and level also opens up tougher
+        // types sooner for a player who's leveling quickly.
+        bool runnersUnlocked = elapsedTime > 20.f || playerLevel >= 3;
+        bool brutesUnlocked = elapsedTime > 90.f || playerLevel >= 6;
+
+        if (brutesUnlocked && r < 0.2f) return EnemyType::Brute;
+        if (runnersUnlocked && r < 0.5f) return EnemyType::Runner;
         return EnemyType::Grunt;
     }
 
@@ -45,20 +59,21 @@ private:
         std::uniform_real_distribution<float> yDist(0.f, static_cast<float>(winSize.y));
 
         switch (sideDist(rng)) {
-            case 0: return {xDist(rng), -30.f};                          // top
-            case 1: return {xDist(rng), winSize.y + 30.f};                // bottom
-            case 2: return {-30.f, yDist(rng)};                          // left
-            default: return {winSize.x + 30.f, yDist(rng)};               // right
+            case 0: return {xDist(rng), -30.f};
+            case 1: return {xDist(rng), winSize.y + 30.f};
+            case 2: return {-30.f, yDist(rng)};
+            default: return {winSize.x + 30.f, yDist(rng)};
         }
     }
 
-    void spawnOne(float elapsedTime, const Player& player) {
+    void spawnOne(float elapsedTime, int playerLevel, const Player& player) {
         Enemy* enemy = pool.spawn();
         if (!enemy) return; // pool exhausted, skip this spawn silently
 
-        EnemyType type = pickType(elapsedTime);
+        EnemyType type = pickType(elapsedTime, playerLevel);
         sf::Vector2f pos = pickEdgePosition();
-        enemy->reset(type, pos, &player);
+        float multiplier = difficultyMultiplier(elapsedTime, playerLevel);
+        enemy->reset(type, pos, &player, multiplier);
     }
 
     EntityPool<Enemy>& pool;

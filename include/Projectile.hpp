@@ -6,11 +6,12 @@
 // that miss don't fly forever).
 class Projectile : public Entity {
 public:
-    void reset(sf::Vector2f startPos, sf::Vector2f dir, float projSpeed, float dmg) {
+    void reset(sf::Vector2f startPos, sf::Vector2f dir, float projSpeed, float dmg, float radiusMultiplier = 1.f) {
         setPosition(startPos);
-        shape.setRadius(4.f);
-        shape.setOrigin(4.f, 4.f);
-        shape.setFillColor(sf::Color(230, 230, 120));
+        float radius = 4.f * radiusMultiplier;
+        shape.setRadius(radius);
+        shape.setOrigin(radius, radius);
+        shape.setFillColor(radiusMultiplier > 1.f ? sf::Color(255, 140, 60) : sf::Color(230, 230, 120));
         shape.setPosition(startPos);
 
         direction = dir;
