@@ -1,14 +1,19 @@
 #pragma once
 #include <SFML/Graphics.hpp>
 #include "Player.hpp"
+#include "Enemy.hpp"
+#include "EntityPool.hpp"
+#include "EnemySpawner.hpp"
 
 class Game {
 public:
     Game()
         : window(sf::VideoMode(1280, 720), "PRAHAAR"),
-          fixedTimeStep(1.f / 60.f) // update logic 60 times per second, always
+          fixedTimeStep(1.f / 60.f),
+          enemyPool(200), // pool size: max simultaneous enemies. Raise if you see enemies stop spawning.
+          spawner(enemyPool, window.getSize())
     {
-        window.setFramerateLimit(144); // render can go faster than logic updates
+        window.setFramerateLimit(144);
     }
 
     void run() {
@@ -18,17 +23,11 @@ public:
         while (window.isOpen()) {
             handleEvents();
 
-            // How much real time passed since last frame
             float frameTime = clock.restart().asSeconds();
-
-            // Safety cap: if the game freezes/lags badly (e.g. window dragged),
-            // don't try to "catch up" hundreds of updates at once.
             if (frameTime > 0.25f) frameTime = 0.25f;
 
             accumulator += frameTime;
 
-            // Run fixed-size update steps until we've caught up to real time.
-            // This decouples game logic speed from render/frame rate.
             while (accumulator >= fixedTimeStep) {
                 update(fixedTimeStep);
                 accumulator -= fixedTimeStep;
@@ -49,18 +48,26 @@ private:
     }
 
     void update(float dt) {
+        elapsedTime += dt;
+
         player.update(dt);
-        // Later: enemyPool.updateAll(dt); projectilePool.updateAll(dt); collisions, etc.
+        spawner.update(dt, elapsedTime, player);
+        enemyPool.updateAll(dt);
+        // Later (Step 4): collision detection between player/enemies/projectiles here.
     }
 
     void render() {
         window.clear(sf::Color(30, 30, 40));
         player.draw(window);
-        // Later: enemyPool.drawAll(window); projectilePool.drawAll(window);
+        enemyPool.drawAll(window);
         window.display();
     }
 
     sf::RenderWindow window;
     const float fixedTimeStep;
+    float elapsedTime = 0.f;
+
     Player player;
+    EntityPool<Enemy> enemyPool;
+    EnemySpawner spawner;
 };
