@@ -350,6 +350,6 @@ private:
     Boss boss;
     bool bossActive = false;
     int normalKillCount = 0;
-    int killsPerBoss = 15;      // tune this: how many normal kills before a boss appears
+    int killsPerBoss = 77;      // tune this: how many normal kills before a boss appears
     int difficultyStage = 1;    // increments each boss defeat, making the next one tougher
 };
