@@ -4,6 +4,7 @@
 #include <SFML/Graphics.hpp>
 #include "Player.hpp"
 #include "Enemy.hpp"
+#include "Boss.hpp"
 #include "Projectile.hpp"
 #include "XPOrb.hpp"
 #include "EntityPool.hpp"
@@ -61,18 +62,29 @@ private:
         elapsedTime += dt;
 
         player.update(dt);
-        spawner.update(dt, elapsedTime, progression.getLevel(), player);
+
+        // Normal enemies stop spawning during a boss fight — this is
+        // the "one-on-one" part of the idea. Enemies already on screen
+        // were cleared the moment the boss appeared (see startBossFight).
+        if (!bossActive) {
+            spawner.update(dt, elapsedTime, progression.getLevel(), player);
+        }
+
         enemyPool.updateAll(dt);
         projectilePool.updateAll(dt);
         xpOrbPool.updateAll(dt);
-        weapon.update(dt, player, enemyPool, projectilePool, powerups);
+        if (bossActive) boss.update(dt);
+
+        weapon.update(dt, player, enemyPool, projectilePool, powerups, &boss, bossActive);
 
         bool burstTriggered = powerups.update(dt);
-        if (burstTriggered) {
-            applyBurst();
-        }
+        if (burstTriggered) applyBurst();
 
         handleCollisions();
+
+        if (!bossActive && normalKillCount >= killsPerBoss) {
+            startBossFight();
+        }
     }
 
     static bool circlesOverlap(sf::Vector2f posA, float radiusA, sf::Vector2f posB, float radiusB) {
@@ -82,23 +94,46 @@ private:
         return distSq <= radiusSum * radiusSum;
     }
 
-    // "J" powerup: instant AoE damage to everything near the player.
+    void startBossFight() {
+        // Clear the board — this is the "after finishing normal enemies"
+        // part. Any enemies still alive when the threshold is hit
+        // despawn so the fight is genuinely one-on-one.
+        for (Enemy* enemy : enemyPool.getActive()) {
+            enemy->setActive(false);
+        }
+
+        sf::Vector2f spawnPos(static_cast<float>(window.getSize().x) / 2.f, -60.f);
+        boss.reset(spawnPos, &player, difficultyStage);
+        bossActive = true;
+        normalKillCount = 0;
+    }
+
     void applyBurst() {
         for (Enemy* enemy : enemyPool.getActive()) {
             if (!enemy->isActive()) continue;
-
             sf::Vector2f diff = enemy->getPosition() - player.getPosition();
             float distSq = diff.x * diff.x + diff.y * diff.y;
-
             if (distSq <= burstRadius * burstRadius) {
                 sf::Vector2f deathPos = enemy->getPosition();
                 enemy->takeDamage(burstDamage);
                 if (!enemy->isActive()) {
+                    normalKillCount++;
                     spawnXPOrb(deathPos);
                 }
             }
         }
-        burstFlashTimer = 0.15f; // brief visual flash, see drawBurstFlash()
+
+        // Burst also hits the boss if one's active and in range.
+        if (bossActive) {
+            sf::Vector2f diff = boss.getPosition() - player.getPosition();
+            float distSq = diff.x * diff.x + diff.y * diff.y;
+            if (distSq <= burstRadius * burstRadius) {
+                boss.takeDamage(burstDamage);
+                if (!boss.isActive()) onBossDefeated();
+            }
+        }
+
+        burstFlashTimer = 0.15f;
     }
 
     void handleCollisions() {
@@ -106,6 +141,7 @@ private:
         auto activeProjectiles = projectilePool.getActive();
         auto activeOrbs = xpOrbPool.getActive();
 
+        // Projectile vs Enemy
         for (Projectile* proj : activeProjectiles) {
             if (!proj->isActive()) continue;
 
@@ -118,30 +154,63 @@ private:
                     proj->setActive(false);
 
                     if (!enemy->isActive()) {
+                        normalKillCount++;
                         spawnXPOrb(deathPos);
                     }
                     break;
                 }
             }
+
+            // Projectile vs Boss
+            if (proj->isActive() && bossActive) {
+                if (circlesOverlap(proj->getPosition(), proj->getRadius(), boss.getPosition(), boss.getRadius())) {
+                    boss.takeDamage(proj->getDamage());
+                    proj->setActive(false);
+                    if (!boss.isActive()) onBossDefeated();
+                }
+            }
         }
 
+        // Enemy vs Player
         for (Enemy* enemy : activeEnemies) {
             if (!enemy->isActive()) continue;
-
             if (circlesOverlap(enemy->getPosition(), enemy->getRadius(), player.getPosition(), player.getRadius())) {
                 player.takeDamage(enemy->getTouchDamage());
             }
         }
 
+        // Boss vs Player
+        if (bossActive && circlesOverlap(boss.getPosition(), boss.getRadius(), player.getPosition(), player.getRadius())) {
+            player.takeDamage(boss.getTouchDamage());
+        }
+
+        // XPOrb vs Player
         for (XPOrb* orb : activeOrbs) {
             if (!orb->isActive()) continue;
-
             if (circlesOverlap(orb->getPosition(), orb->getRadius(), player.getPosition(), player.getRadius())) {
                 float value = orb->getValue();
                 orb->setActive(false);
                 progression.addXP(value, [this]() { applyRandomUpgrade(); });
             }
         }
+    }
+
+    // Boss defeated: fight ends, next boss will be tougher, and per
+    // the original idea, the player's level rises on the kill. We
+    // grant exactly enough XP to force one level-up (also awarding
+    // the usual random upgrade), rather than inventing a separate
+    // "boss level" system disconnected from normal progression.
+    void onBossDefeated() {
+        bossActive = false;
+        difficultyStage++;
+
+        sf::Vector2f pos = boss.getPosition();
+        for (int i = 0; i < 5; ++i) {
+            sf::Vector2f offset(static_cast<float>((i - 2) * 15), static_cast<float>((i % 2 == 0) ? 15 : -15));
+            spawnXPOrb(pos + offset);
+        }
+
+        progression.addXP(progression.xpToNextLevel(), [this]() { applyRandomUpgrade(); });
     }
 
     void spawnXPOrb(sf::Vector2f pos) {
@@ -159,28 +228,25 @@ private:
             case 2: weapon.increaseDamage(4.f); break;
             default: weapon.increaseFireRate(0.3f); break;
         }
-        // Note: this picks and applies a bonus instantly for now.
-        // Step 7 (UI polish) will turn this into a pause + pick-1-of-3 menu
-        // once text rendering is wired up.
     }
 
     void render() {
         window.clear(sf::Color(30, 30, 40));
         player.draw(window);
         enemyPool.drawAll(window);
+        if (bossActive) boss.draw(window);
         projectilePool.drawAll(window);
         xpOrbPool.drawAll(window);
         drawBurstFlash();
         drawXPBar();
         drawPowerupBars();
+        if (bossActive) drawBossHealthBar();
         window.display();
     }
 
-    // Brief expanding ring when Burst fires, so the effect is visible
-    // even without a proper particle system yet.
     void drawBurstFlash() {
         if (burstFlashTimer <= 0.f) return;
-        burstFlashTimer -= 1.f / 144.f; // approximate; fine for a cosmetic flash
+        burstFlashTimer -= 1.f / 144.f;
 
         sf::CircleShape ring(burstRadius);
         ring.setOrigin(burstRadius, burstRadius);
@@ -216,20 +282,18 @@ private:
         }
     }
 
-    // 3 small bottom-left bars showing each powerup's recharge state.
-    // Full/bright = ready to use, empty/dim = just used, refilling.
     void drawPowerupBars() {
         float barWidth = 90.f;
         float barHeight = 8.f;
         float startX = 20.f;
         float startY = static_cast<float>(window.getSize().y) - 60.f;
 
-        drawOneBar(startX, startY, barWidth, barHeight, powerups.burstReadiness(), sf::Color(255, 140, 60), "J");
-        drawOneBar(startX, startY + 16.f, barWidth, barHeight, powerups.bigBulletsReadiness(), sf::Color(255, 200, 80), "K");
-        drawOneBar(startX, startY + 32.f, barWidth, barHeight, powerups.fireRateReadiness(), sf::Color(120, 220, 255), "L");
+        drawOneBar(startX, startY, barWidth, barHeight, powerups.burstReadiness(), sf::Color(255, 140, 60));
+        drawOneBar(startX, startY + 16.f, barWidth, barHeight, powerups.bigBulletsReadiness(), sf::Color(255, 200, 80));
+        drawOneBar(startX, startY + 32.f, barWidth, barHeight, powerups.fireRateReadiness(), sf::Color(120, 220, 255));
     }
 
-    void drawOneBar(float x, float y, float width, float height, float ratio, sf::Color color, const char*) {
+    void drawOneBar(float x, float y, float width, float height, float ratio, sf::Color color) {
         sf::RectangleShape background(sf::Vector2f(width, height));
         background.setPosition(x, y);
         background.setFillColor(sf::Color(60, 60, 60));
@@ -240,9 +304,27 @@ private:
 
         window.draw(background);
         window.draw(fill);
-        // Note: the J/K/L label isn't drawn yet — no font wired up until
-        // Step 7. For now, remember the order: top=J(burst), mid=K(big
-        // bullets), bottom=L(rapid fire).
+    }
+
+    // Red bar top-center of screen while a boss is active — the classic
+    // "boss health bar" convention, distinct from the player's own bar.
+    void drawBossHealthBar() {
+        float barWidth = 500.f;
+        float barHeight = 14.f;
+        float x = (static_cast<float>(window.getSize().x) - barWidth) / 2.f;
+        float y = 50.f;
+        float ratio = boss.getHealth() / boss.getMaxHealth();
+
+        sf::RectangleShape background(sf::Vector2f(barWidth, barHeight));
+        background.setPosition(x, y);
+        background.setFillColor(sf::Color(60, 20, 60));
+
+        sf::RectangleShape fill(sf::Vector2f(barWidth * ratio, barHeight));
+        fill.setPosition(x, y);
+        fill.setFillColor(sf::Color(220, 60, 220));
+
+        window.draw(background);
+        window.draw(fill);
     }
 
     sf::RenderWindow window;
@@ -263,4 +345,11 @@ private:
     float burstRadius = 180.f;
     float burstDamage = 50.f;
     float burstFlashTimer = 0.f;
+
+    // --- Boss fight tracking ---
+    Boss boss;
+    bool bossActive = false;
+    int normalKillCount = 0;
+    int killsPerBoss = 15;      // tune this: how many normal kills before a boss appears
+    int difficultyStage = 1;    // increments each boss defeat, making the next one tougher
 };
