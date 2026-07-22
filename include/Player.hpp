@@ -52,10 +52,15 @@ public:
     // --- Health system ---
     // A short invulnerability window after each hit prevents an enemy
     // standing on top of the player from draining full HP in one frame.
-    void takeDamage(float amount) {
-        if (invulnerableTimer > 0.f) return;
+    // Returns true if the hit actually landed (false if blocked by the
+    // invulnerability window) — Game uses this to decide whether to
+    // trigger screen shake, so it doesn't shake every single frame an
+    // enemy stands on top of you.
+    bool takeDamage(float amount) {
+        if (invulnerableTimer > 0.f) return false;
         health = std::max(0.f, health - amount);
         invulnerableTimer = 0.5f; // half a second of grace after each hit
+        return true;
     }
 
     void heal(float amount) {

@@ -7,6 +7,7 @@
 #include "Boss.hpp"
 #include "Projectile.hpp"
 #include "XPOrb.hpp"
+#include "Particle.hpp"
 #include "EntityPool.hpp"
 #include "EnemySpawner.hpp"
 #include "Weapon.hpp"
@@ -21,10 +22,12 @@ public:
           enemyPool(200),
           projectilePool(300),
           xpOrbPool(200),
+          particlePool(400),
           spawner(enemyPool, window.getSize()),
           rng(std::random_device{}())
     {
         window.setFramerateLimit(144);
+        defaultView = window.getDefaultView();
     }
 
     void run() {
@@ -73,6 +76,8 @@ private:
         enemyPool.updateAll(dt);
         projectilePool.updateAll(dt);
         xpOrbPool.updateAll(dt);
+        particlePool.updateAll(dt);
+        if (shakeTimer > 0.f) shakeTimer -= dt;
         if (bossActive) boss.update(dt);
 
         weapon.update(dt, player, enemyPool, projectilePool, powerups, &boss, bossActive);
@@ -119,6 +124,7 @@ private:
                 if (!enemy->isActive()) {
                     normalKillCount++;
                     spawnXPOrb(deathPos);
+                    spawnDeathParticles(deathPos, sf::Color(255, 160, 60), 10);
                 }
             }
         }
@@ -134,6 +140,7 @@ private:
         }
 
         burstFlashTimer = 0.15f;
+        triggerScreenShake(10.f, 0.2f);
     }
 
     void handleCollisions() {
@@ -156,6 +163,7 @@ private:
                     if (!enemy->isActive()) {
                         normalKillCount++;
                         spawnXPOrb(deathPos);
+                        spawnDeathParticles(deathPos, sf::Color(220, 80, 80), 8);
                     }
                     break;
                 }
@@ -175,13 +183,17 @@ private:
         for (Enemy* enemy : activeEnemies) {
             if (!enemy->isActive()) continue;
             if (circlesOverlap(enemy->getPosition(), enemy->getRadius(), player.getPosition(), player.getRadius())) {
-                player.takeDamage(enemy->getTouchDamage());
+                if (player.takeDamage(enemy->getTouchDamage())) {
+                    triggerScreenShake(6.f, 0.15f);
+                }
             }
         }
 
         // Boss vs Player
         if (bossActive && circlesOverlap(boss.getPosition(), boss.getRadius(), player.getPosition(), player.getRadius())) {
-            player.takeDamage(boss.getTouchDamage());
+            if (player.takeDamage(boss.getTouchDamage())) {
+                triggerScreenShake(10.f, 0.2f);
+            }
         }
 
         // XPOrb vs Player
@@ -210,6 +222,9 @@ private:
             spawnXPOrb(pos + offset);
         }
 
+        spawnDeathParticles(pos, sf::Color(220, 60, 220), 30);
+        triggerScreenShake(16.f, 0.35f);
+
         progression.addXP(progression.xpToNextLevel(), [this]() { applyRandomUpgrade(); });
     }
 
@@ -218,6 +233,31 @@ private:
         if (orb) {
             orb->reset(pos, xpPerEnemy, &player);
         }
+    }
+
+    // Small burst of fading particles flying outward — used for enemy
+    // and boss deaths so a kill has some visual "pop" beyond the
+    // entity just vanishing.
+    void spawnDeathParticles(sf::Vector2f pos, sf::Color color, int count) {
+        std::uniform_real_distribution<float> angleDist(0.f, 6.2831853f); // 0 to 2*pi
+        std::uniform_real_distribution<float> speedDist(60.f, 160.f);
+
+        for (int i = 0; i < count; ++i) {
+            Particle* p = particlePool.spawn();
+            if (!p) break; // pool exhausted, skip remaining silently
+
+            float angle = angleDist(rng);
+            float speed = speedDist(rng);
+            sf::Vector2f vel(std::cos(angle) * speed, std::sin(angle) * speed);
+            p->reset(pos, vel, color, 0.4f);
+        }
+    }
+
+    void triggerScreenShake(float magnitude, float duration) {
+        // Overwrite rather than accumulate — a second hit while already
+        // shaking just refreshes the effect instead of stacking forever.
+        shakeMagnitude = magnitude;
+        shakeTimer = duration;
     }
 
     void applyRandomUpgrade() {
@@ -232,15 +272,30 @@ private:
 
     void render() {
         window.clear(sf::Color(30, 30, 40));
+
+        // Apply screen shake to world-space rendering only. UI (bars)
+        // gets reset back to the default view further down, so shake
+        // never makes health/XP bars jitter or drift off-screen.
+        sf::View worldView = defaultView;
+        if (shakeTimer > 0.f) {
+            std::uniform_real_distribution<float> offsetDist(-shakeMagnitude, shakeMagnitude);
+            worldView.move(offsetDist(rng), offsetDist(rng));
+        }
+        window.setView(worldView);
+
         player.draw(window);
         enemyPool.drawAll(window);
         if (bossActive) boss.draw(window);
         projectilePool.drawAll(window);
         xpOrbPool.drawAll(window);
+        particlePool.drawAll(window);
         drawBurstFlash();
+
+        window.setView(defaultView);
         drawXPBar();
         drawPowerupBars();
         if (bossActive) drawBossHealthBar();
+
         window.display();
     }
 
@@ -336,6 +391,7 @@ private:
     EntityPool<Enemy> enemyPool;
     EntityPool<Projectile> projectilePool;
     EntityPool<XPOrb> xpOrbPool;
+    EntityPool<Particle> particlePool;
     EnemySpawner spawner;
     Weapon weapon;
     Progression progression;
@@ -346,10 +402,15 @@ private:
     float burstDamage = 50.f;
     float burstFlashTimer = 0.f;
 
+    // --- Screen shake ---
+    sf::View defaultView;
+    float shakeTimer = 0.f;
+    float shakeMagnitude = 0.f;
+
     // --- Boss fight tracking ---
     Boss boss;
     bool bossActive = false;
     int normalKillCount = 0;
-    int killsPerBoss = 77;      // tune this: how many normal kills before a boss appears
+    int killsPerBoss = 15;      // tune this: how many normal kills before a boss appears
     int difficultyStage = 1;    // increments each boss defeat, making the next one tougher
 };
