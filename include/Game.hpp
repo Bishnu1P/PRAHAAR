@@ -1,6 +1,7 @@
 #pragma once
 #include <cmath>
 #include <random>
+#include <string>
 #include <SFML/Graphics.hpp>
 #include "Player.hpp"
 #include "Enemy.hpp"
@@ -13,6 +14,8 @@
 #include "Weapon.hpp"
 #include "Progression.hpp"
 #include "PowerupSystem.hpp"
+
+enum class GameState { Title, Playing };
 
 class Game {
 public:
@@ -28,6 +31,22 @@ public:
     {
         window.setFramerateLimit(144);
         defaultView = window.getDefaultView();
+
+        // "Press ENTER to start" prompt is plain Latin text, so
+        // regular SFML text rendering works fine for it.
+        fontLoaded = font.loadFromFile("assets/fonts/NotoSansDevanagari-Regular.ttf");
+
+        // The प्रहार title itself is a pre-rendered IMAGE, not live text.
+        // SFML's sf::Text does not perform complex script shaping
+        // (no HarfBuzz), so Devanagari conjuncts like प्र render
+        // incorrectly if drawn as text. Using a properly-shaped image
+        // sidesteps that limitation entirely.
+        titleImageLoaded = titleTexture.loadFromFile("assets/sprites/prahaar_title.png");
+        if (titleImageLoaded) {
+            titleSprite.setTexture(titleTexture);
+            sf::FloatRect bounds = titleSprite.getLocalBounds();
+            titleSprite.setOrigin(bounds.width / 2.f, bounds.height / 2.f);
+        }
     }
 
     void run() {
@@ -62,6 +81,11 @@ private:
     }
 
     void update(float dt) {
+        if (state == GameState::Title) {
+            updateTitleScreen();
+            return;
+        }
+
         elapsedTime += dt;
 
         player.update(dt);
@@ -97,6 +121,17 @@ private:
         float distSq = diff.x * diff.x + diff.y * diff.y;
         float radiusSum = radiusA + radiusB;
         return distSq <= radiusSum * radiusSum;
+    }
+
+    // While on the title screen, the only thing that happens is
+    // waiting for Enter to be pressed (edge-detected, so holding it
+    // down doesn't matter) to start the actual game.
+    void updateTitleScreen() {
+        bool down = sf::Keyboard::isKeyPressed(sf::Keyboard::Enter);
+        if (down && !enterKeyWasDown) {
+            state = GameState::Playing;
+        }
+        enterKeyWasDown = down;
     }
 
     void startBossFight() {
@@ -249,7 +284,7 @@ private:
             float angle = angleDist(rng);
             float speed = speedDist(rng);
             sf::Vector2f vel(std::cos(angle) * speed, std::sin(angle) * speed);
-            p->reset(pos, vel, color, 0.4f);
+            p->reset(pos, vel, color, 0.6f);
         }
     }
 
@@ -271,6 +306,11 @@ private:
     }
 
     void render() {
+        if (state == GameState::Title) {
+            renderTitleScreen();
+            return;
+        }
+
         window.clear(sf::Color(30, 30, 40));
 
         // Apply screen shake to world-space rendering only. UI (bars)
@@ -295,6 +335,31 @@ private:
         drawXPBar();
         drawPowerupBars();
         if (bossActive) drawBossHealthBar();
+
+        window.display();
+    }
+
+    // The प्रहार title screen. Falls back to plain gameplay-colored
+    // background with no text if the Devanagari font failed to load,
+    // rather than crashing or drawing garbled glyphs.
+    void renderTitleScreen() {
+        window.setView(defaultView);
+        window.clear(sf::Color(20, 15, 25));
+
+        if (titleImageLoaded) {
+            titleSprite.setPosition(window.getSize().x / 2.f, window.getSize().y / 2.f - 40.f);
+            window.draw(titleSprite);
+        }
+
+        if (fontLoaded) {
+            std::string promptUtf8 = u8"Press ENTER to start";
+            sf::Text prompt(sf::String::fromUtf8(promptUtf8.begin(), promptUtf8.end()), font, 28);
+            prompt.setFillColor(sf::Color(200, 200, 200));
+            sf::FloatRect promptBounds = prompt.getLocalBounds();
+            prompt.setOrigin(promptBounds.width / 2.f, promptBounds.height / 2.f);
+            prompt.setPosition(window.getSize().x / 2.f, window.getSize().y / 2.f + 60.f);
+            window.draw(prompt);
+        }
 
         window.display();
     }
@@ -406,6 +471,15 @@ private:
     sf::View defaultView;
     float shakeTimer = 0.f;
     float shakeMagnitude = 0.f;
+
+    // --- Title screen ---
+    GameState state = GameState::Title;
+    sf::Font font;
+    bool fontLoaded = false;
+    bool enterKeyWasDown = false;
+    sf::Texture titleTexture;
+    sf::Sprite titleSprite;
+    bool titleImageLoaded = false;
 
     // --- Boss fight tracking ---
     Boss boss;

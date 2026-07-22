@@ -15,8 +15,8 @@ public:
         age = 0.f;
         active = true;
 
-        shape.setRadius(3.f);
-        shape.setOrigin(3.f, 3.f);
+        shape.setRadius(7.f);
+        shape.setOrigin(7.f, 7.f);
         shape.setFillColor(color);
         shape.setPosition(spawnPos);
     }
